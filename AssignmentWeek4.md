@@ -1,0 +1,168 @@
+# Reproducible Research: Week 4 Assignment: Impact of Storm Events on Public Health
+##Synopsis
+I analyzed data from NOAA providing information on storm types and their impacts on populations in terms of health and monetary damages.  In the area of public health, tornadoes were clearly the leaders in total fatalities and injuries; wind, heat waves, and flooding were responsible for the bulk of the remaining fatalities and injuries.  In the area of monetary damages, different types of flooding activities accounted for the top five categories of property damage; droughts caused the most crop damage, followed by two types of flood and two types of ice events.  
+
+##Data Processing
+The initial step in processing the data was to download the data file from the NOAA data set.  I first initialized a few things like working directory, and then downloaded the file from https://d396qusza40orc.cloudfront.net/repdata%2Fdata%2FStormData.csv.bz2 .  I then used read.csv to extract the CSV from the BZ2 file and read the data into STORMDATA.
+
+
+```r
+###  Set my working directory- update this as required
+
+setwd("H:/BigStegShare/COURSERA/DataScience/ReproducibleData/")
+
+###  Website with data:
+#https://d396qusza40orc.cloudfront.net/repdata%2Fdata%2FStormData.csv.bz2
+
+#download.file("https://d396qusza40orc.cloudfront.net/repdata%2Fdata%2FStormData.csv.bz2","StormData.csv.bz2")
+#uncomment the above line before submission- commenting now so it doesn't redownload every time I save
+
+###   Read in data.
+#unzipping code idea taken from stackoverflow, Dirk Eddelbuettel's contribution
+#http://stackoverflow.com/questions/3053833/using-r-to-download-zipped-data-file-extract-and-import-data
+STORMDATA <- read.csv("StormData.csv.bz2")
+
+#need plyr package so we can use ddplyr later
+#install.packages("plyr")
+library(plyr)
+```
+
+```
+## Warning: package 'plyr' was built under R version 3.2.5
+```
+
+The next step was to clean up the data.  
+The Event Types (EVTYPE) are in both uppercase and lowercase; convert to all uppercase.  Also do this for exponents for damage fields.
+
+
+```r
+STORMDATA$EVTYPE <- toupper(STORMDATA$EVTYPE)
+STORMDATA$PROPDMGEXP <- toupper(STORMDATA$PROPDMGEXP)
+STORMDATA$CROPDMGEXP <- toupper(STORMDATA$CROPDMGEXP)
+
+#make event types into factors
+STORMDATA$EVTYPE <- factor(STORMDATA$EVTYPE)
+
+#convert damage numbers with exponents into real numbers we can do math on.  Do this by creating a new column in which we'll do the math, so we leave the original data intact.  Initially populate with the identity 1.
+STORMDATA$PROPDMGNUM <- 0
+STORMDATA$CROPDMGNUM <- 0
+
+#Discussion on how to handle the exponent values was here
+#  https://rstudio-pubs-static.s3.amazonaws.com/58957_37b6723ee52b455990e149edde45e5b6.html
+#  (notable comment from Eddie Song: "My approach was to ignore all of them because these amounts are negligible when we are talking about sums that go into the billions.")
+#and here
+#  https://www.coursera.org/learn/reproducible-research/discussions/Q_hWkPXxEeWPyw7tSN6RVw
+
+#Use the multiplier in the EXP field to create a new "total" dollar amount representing damamges for both PROPDMG and CROPDMG.  This data goes into new columns PROPDMGNUM and CROPDMGNUM.
+#The unfortunate side effect of this is that the numbers become so large that they are represented in exponents, which can be difficult to interpret.
+
+STORMDATA[STORMDATA$PROPDMGEXP == "H",38] <- 100 * STORMDATA[STORMDATA$PROPDMGEXP == "H", 25]
+STORMDATA[STORMDATA$PROPDMGEXP == "K",38] <- 1000 * STORMDATA[STORMDATA$PROPDMGEXP == "K", 25]
+STORMDATA[STORMDATA$PROPDMGEXP == "M",38] <- 1000000 * STORMDATA[STORMDATA$PROPDMGEXP == "M", 25]
+STORMDATA[STORMDATA$PROPDMGEXP == "B",38] <- 1000000000 * STORMDATA[STORMDATA$PROPDMGEXP == "B", 25]
+
+#STORMDATA[STORMDATA$CROPDMGEXP == "H",39] <- 100 * STORMDATA[STORMDATA$CROPDMGEXP == "H", 27]
+STORMDATA[STORMDATA$CROPDMGEXP == "K",39] <- 1000 * STORMDATA[STORMDATA$CROPDMGEXP == "K", 27]
+STORMDATA[STORMDATA$CROPDMGEXP == "M",39] <- 1000000 * STORMDATA[STORMDATA$CROPDMGEXP == "M", 27]
+STORMDATA[STORMDATA$CROPDMGEXP == "B",39] <- 1000000000 * STORMDATA[STORMDATA$CROPDMGEXP == "B", 27]
+```
+
+
+Many Event Types contain summaries of events taking place on one or more days for an area.  Removing those, since they (should) have their data listed individually elsewhere.
+
+
+```r
+STORMDATA <- STORMDATA[grep("SUMMARY", STORMDATA$EVTYPE, invert = TRUE),]
+```
+
+Create a data frame of event types and their sums of fatalities and injuries. Save to table "ow".
+
+
+```r
+ow <- ddply(STORMDATA, .(EVTYPE), summarize, sumFatalities = sum(FATALITIES), sumInjuries = sum(INJURIES))
+#convert zeros to NAs so we can do logs on the data
+ow[ow$sumFatalities == 0,2] <- NA
+ow[ow$sumInjuries == 0,3] <- NA
+```
+
+Create a data frame of event types and their sums/counts of property and crop damage.  Save to table "bux".
+
+
+```r
+bux <- ddply(STORMDATA, .(EVTYPE), summarize, sumPropDamage = sum(PROPDMGNUM), sumCropDamage = sum(CROPDMGNUM))
+#convert zeros to NAs so we can do logs on the data
+bux[bux$sumPropDamage == 0,2] <- NA
+bux[bux$sumCropDamage == 0,3] <- NA
+
+###Get top 10 of each EVTYPE
+
+top10Injuries <- ow[order(ow$sumInjuries, na.last = TRUE, decreasing = TRUE)[1:10],]
+top10Fatalities <- ow[order(ow$sumFatalities, na.last = TRUE, decreasing = TRUE)[1:10],]
+
+top10PropDmg <- bux[order(bux$sumPropDamage, na.last = TRUE, decreasing = TRUE)[1:10],]
+top10CropDmg <- bux[order(bux$sumCropDamage, na.last = TRUE, decreasing = TRUE)[1:10],]
+```
+
+*consolidate data with typos- do this after you subset out the zero fields, because it'll be faster, even though we have to do it twice...
+-- these would add a few rows, but I don't know that the numbers are significant to worry about.  
+
+##Results
+1.Across the United States, which types of events (as indicated in the EVTYPE variable) are most harmful with respect to population health?
+
+I looked at FATALITIES and INJURIES to determine impact to public health.  In both categories, tornados caused the most fatalities and injuries.  Flooding and heat events were next in line, but tornadoes clearly had a much more significant effect than the next four categories combined.  
+
+Following is a chart showing the top 10 types of storms and the numbers of fatalities and injuries caused by each.
+
+
+```r
+par(mfrow = c(2,1), mar = c(4,14,2,1))
+barplot(top10Fatalities$sumFatalities, names.arg = top10Fatalities$EVTYPE, col = "blue", yaxt="n", horiz = TRUE)
+title(main = "Events Causing the Most Fatalities")
+title(xlab = "Event Type")
+#title(ylab = "Number of Fatalities")
+axis(2,at=1:10,labels = top10Fatalities$EVTYPE, las=2)
+
+barplot(top10Injuries$sumInjuries, names.arg = top10Injuries$EVTYPE, col = "green", yaxt="n", horiz = TRUE)
+title(main = "Events Causing the Most Injuries")
+title(xlab = "Event Type")
+#title(ylab = "Number of Injuries")
+axis(2,at=1:10,labels = top10Injuries$EVTYPE, las=2)
+```
+
+![](AssignmentWeek4_files/figure-html/unnamed-chunk-6-1.png)
+
+2.Across the United States, which types of events have the greatest economic consequences?
+
+I looked at PROPDMG and CROPDMG to measure economic consequences.  
+
+Following is a chart showing the top 10 types of storms and the dollar amounts of property damage and crop damage caused by each.
+
+
+```r
+par(mfrow = c(2,1), mar = c(4,14,2,1))
+barplot(top10PropDmg$sumPropDamage, names.arg = top10PropDmg$EVTYPE, col = "blue", yaxt="n", horiz = TRUE)
+title(main = "Events Causing the Most Property Damage")
+title(xlab = "Event Type")
+#title(ylab = "Damage in Dollars")
+axis(2,at=1:10,labels = top10PropDmg$EVTYPE, las=2)
+
+barplot(top10CropDmg$sumCropDamage, names.arg = top10CropDmg$EVTYPE, col = "green", yaxt="n", horiz = TRUE)
+title(main = "Events Causing the Most Crop Damage")
+title(xlab = "Event Type")
+#title(ylab = "Damage in Dollars")
+axis(2,at=1:10,labels = top10CropDmg$EVTYPE, las=2)
+```
+
+![](AssignmentWeek4_files/figure-html/unnamed-chunk-7-1.png)
+
+##Administrivia
+
+Computer Architecture: Intel
+
+Operating System: Windows 10
+
+Software Toolchain: R323, RStudio Version 0.99.484
+
+Supporting software/infrastructure: R packages, dependencies.  I used the plyr package's dplyr command to create the tables on which I based my charts.
+
+External Dependencies: web sites, data repositories, etc: Data came from website: https://d396qusza40orc.cloudfront.net/repdata%2Fdata%2FStormData.csv.bz2
